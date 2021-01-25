@@ -10,10 +10,8 @@ object ScalaReader {
     val url  =  "jdbc:db2://dashdb-txn-sbox-yp-dal09-08.services.dal.bluemix.net:50000/BLUDB"
     val username =  "jzh46612"
     val password =  "p253hd83m2jlx@z0"
-    Class. forName ( "com.ibm.db2.jcc.DB2Driver" )   // needed   only for db2jcc.jar, not db2jcc4.jar
-    var con = java.sql.DriverManager. getConnection ( url ,  username ,  password )
 
-    val spark = SparkSession.builder.master("local[1]").appName("SparkByExamples.com").getOrCreate
+    val spark = SparkSession.builder.master("local[1]").appName("ScalaReader").getOrCreate
     spark.sparkContext.hadoopConfiguration.set("fs.stocator.scheme.list","cos")
     spark.sparkContext.hadoopConfiguration.set("fs.cos.impl","com.ibm.stocator.fs.ObjectStoreFileSystem")
     spark.sparkContext.hadoopConfiguration.set("fs.stocator.cos.impl","com.ibm.stocator.fs.cos.COSAPIClient")
@@ -22,13 +20,17 @@ object ScalaReader {
     spark.sparkContext.hadoopConfiguration.set("fs.cos.myCos.endpoint","https://s3.us.cloud-object-storage.appdomain.cloud")
     spark.sparkContext.hadoopConfiguration.set("fs.cos.myCos.secret.key","27b804de3b329a680dbf148fd76da208f33e8a5aaaea4cbd")
 
+    // read employee data
     val sqlContext = new SQLContext(spark.sparkContext)
     val df = sqlContext.read.format("com.databricks.spark.csv")
       .option("delimiter", ",")
       .option("header", "true")
       .load("cos://candidate-exercise.myCos/emp-data.csv")
+
+    // 1: display 15 records from input data
     df.show(15)
 
+    // write to db2 database in JZH46612.employee
     df.write
       .format("jdbc")
       .option("url", url)
@@ -37,6 +39,7 @@ object ScalaReader {
       .option("password", password)
       .mode(org.apache.spark.sql.SaveMode.Overwrite)
       .save()
+
 
     val employeeDF = sqlContext.load("jdbc",
       Map(
@@ -48,6 +51,7 @@ object ScalaReader {
       )
     )
 
+    // find gender ratio and display
     val genderRatioDF = employeeDF.groupBy("department")
       .agg(
         sum(expr("case when Gender='Male' then 1 else 0 end")).divide(count("*")).as("Male_ratio")
@@ -55,6 +59,7 @@ object ScalaReader {
       )
     genderRatioDF.show()
 
+    // clean up salary values and get the average salary per dept
     val avgSalaryDF = employeeDF
       .withColumn("clean_salary",regexp_replace(col("salary"), "\\$" , ""))
       .withColumn("clean_salary",regexp_replace(col("clean_salary"), "," , ""))
@@ -65,6 +70,7 @@ object ScalaReader {
       )
     avgSalaryDF.show()
 
+    // get male and female avg salary and calculate the gap per dept.
     val salaryGapDF = employeeDF
       .withColumn("clean_salary",regexp_replace(col("salary"), "\\$" , ""))
       .withColumn("clean_salary",regexp_replace(col("clean_salary"), "," , ""))
@@ -78,7 +84,8 @@ object ScalaReader {
 
     salaryGapDF.show()
 
-    salaryGapDF.write.parquet("cos://candidate-exercise.myCos/emp-salary-gap")
+    // write one of the reports to parquet
+    salaryGapDF.write.mode("overwrite").parquet("cos://candidate-exercise.myCos/emp-salary-gap")
 
   }
 }
